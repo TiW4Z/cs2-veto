@@ -80,12 +80,16 @@ button:disabled{opacity:.5;cursor:default}
  padding:8px 12px;font-size:14px}
 .pcard.on{border-color:#8ce99a}
 .coinwrap{display:flex;flex-direction:column;align-items:center;gap:16px;
- padding:24px 0;perspective:1000px}
-.cointoss{animation:toss 2.6s cubic-bezier(.33,0,.4,1)}
-@keyframes toss{0%{transform:translateY(20px)}45%{transform:translateY(-110px)}
- 100%{transform:translateY(0)}}
-.coin{width:150px;height:150px;position:relative;transform-style:preserve-3d;
- transition:transform 2.6s cubic-bezier(.2,.75,.25,1)}
+ padding:24px 0;perspective:1100px}
+.coin{width:150px;height:150px;position:relative;transform-style:preserve-3d}
+.coin.spinA{animation:flipA 2.6s cubic-bezier(.25,.6,.3,1) forwards}
+.coin.spinB{animation:flipB 2.6s cubic-bezier(.25,.6,.3,1) forwards}
+@keyframes flipA{0%{transform:translateY(10px) rotateX(0)}
+ 45%{transform:translateY(-95px) rotateX(900deg)}
+ 100%{transform:translateY(0) rotateX(1800deg)}}
+@keyframes flipB{0%{transform:translateY(10px) rotateX(0)}
+ 45%{transform:translateY(-95px) rotateX(990deg)}
+ 100%{transform:translateY(0) rotateX(1980deg)}}
 .coin .face{position:absolute;inset:0;border-radius:50%;display:flex;
  align-items:center;justify-content:center;text-align:center;padding:8px;
  font-size:19px;font-weight:800;backface-visibility:hidden;
@@ -459,10 +463,12 @@ function showLinks(hostId, tokens, role, lobby){
   let html = `<h2>Lobby ready — first ban: ${lobby.team_names[lobby.first]}</h2>
     <div class="banner">⚠️ Keep this tab open — your browser is hosting the
     veto. If you close it, the lobby ends.</div>`;
-  const teamsToSend = role === "spec" ? ["A","B"] : [other(role)];
-  for(const t of teamsToSend){
+  for(const t of ["A","B"]){
     const url = linkFor(t);
-    html += `<div class="linkbox"><b>Send to ${lobby.team_names[t]}:</b><br>
+    const label = (t === role)
+      ? `Send to your teammates (${lobby.team_names[t]})`
+      : `Send to ${lobby.team_names[t]}`;
+    html += `<div class="linkbox"><b>${label}:</b><br>
       <a href="${url}">${url}</a>
       <button class="small" onclick="navigator.clipboard.writeText('${url}')">copy</button></div>`;
   }
@@ -693,15 +699,12 @@ function showCoin(first, tn){
   if(coinAnimating) return;
   coinAnimating = true;
   sfxCoin();
+  // .spinA / .spinB keyframes spin the coin and land it upright on the winner
   document.getElementById("coinArea").innerHTML =
-    `<div class="coinwrap"><div class="cointoss"><div class="coin" id="coin">
+    `<div class="coinwrap"><div class="coin spin${first}" id="coin">
        <div class="face front">${tn.A}</div>
-       <div class="face back">${tn.B}</div></div></div>
+       <div class="face back">${tn.B}</div></div>
      <div class="coinres" id="coinres">&nbsp;</div></div>`;
-  const coin = document.getElementById("coin");
-  // rotateX so the landed face ends upright; +180 lands on the back (Team B)
-  const target = 360 * 5 + (first === "A" ? 0 : 180);
-  requestAnimationFrame(() => { coin.style.transform = `rotateX(${target}deg)`; });
   setTimeout(() => {
     const r = document.getElementById("coinres");
     if(r){ r.textContent = `🪙 ${tn[first]} bans first!`; r.classList.add("show"); }
