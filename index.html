@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CS2 Map Veto</title>
+<!--
+  CS2 Map Veto — serverless peer-to-peer map veto.
+  ================================================
+  A single static page. No backend, no hosting cost. Two captains connect
+  browser-to-browser over WebRTC. The free public PeerJS broker + Google STUN
+  are used ONLY for the initial handshake (to discover IPs and punch through
+  home routers); the veto data then flows directly peer-to-peer.
+
+  The person who creates the lobby keeps this tab open — their browser is the
+  authority that runs the veto and relays state to the other team. They send
+  one invite link per team that isn't them.
+-->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{font-family:system-ui,Segoe UI,Arial;background:#15171c;color:#e7e9ee;
+ max-width:880px;margin:0 auto;padding:20px}
+h1{font-size:22px}h2{font-size:16px;color:#9fb4ff;margin-top:22px}
+a{color:#8ce99a}
+.hidden{display:none}
+.row{display:flex;gap:24px;flex-wrap:wrap}
+label{display:block;margin:6px 0}
+input[type=text]{background:#1f232b;border:1px solid #2c313c;color:#e7e9ee;
+ border-radius:6px;padding:6px 8px;width:200px}
+button{background:#3b5bdb;color:#fff;border:0;border-radius:8px;padding:10px 16px;
+ font-size:15px;cursor:pointer}
+button.small{padding:4px 10px;font-size:12px;background:#2c313c}
+.maps-pick{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.maps-pick label{background:#1f232b;border:1px solid #2c313c;border-radius:8px;
+ padding:8px 10px;cursor:pointer}
+.linkbox{background:#1f232b;border:1px solid #2c313c;border-radius:8px;
+ padding:10px;margin:8px 0;word-break:break-all}
+.banner{background:#2b3a67;border:1px solid #3b5bdb;border-radius:8px;
+ padding:8px 12px;margin:10px 0;font-size:14px}
+.bar{display:flex;justify-content:space-between;align-items:center}
+.teamtag{font-weight:700;padding:3px 9px;border-radius:6px}
+.turn{background:#2b3a67;border:1px solid #3b5bdb;border-radius:10px;
+ padding:10px 14px;margin:14px 0;font-size:17px}
+.maps{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+ gap:10px;margin-top:8px}
+.map{background:#1f232b;border:1px solid #2c313c;border-radius:10px;
+ padding:18px 12px;text-align:center;font-size:16px;position:relative}
+.map.available.mine{cursor:pointer;border-color:#3b5bdb}
+.map.available.mine:hover{background:#26304a}
+.map.banned{opacity:.35;text-decoration:line-through}
+.map.picked_A{border-color:#8ce99a;background:#1c2a20}
+.map.picked_B{border-color:#ffd43b;background:#2a261c}
+.map.decider{border-color:#9fb4ff;background:#1e2440}
+.tag{position:absolute;top:6px;right:8px;font-size:11px;opacity:.8}
+.side button{margin:6px 4px 0 0}
+.result{background:#1f232b;border:1px solid #2c313c;border-radius:10px;
+ padding:14px;margin-top:18px}
+.log{font-size:13px;color:#9aa3b2;margin-top:14px;max-height:160px;overflow:auto}
+.err{color:#ff8787;min-height:18px}
+.status{font-size:13px;color:#9aa3b2}
+</style>
+</head>
+<body>
+
+<!-- ===================== CREATE VIEW ===================== -->
+<div id="createView">
+  <h1>CS2 Map Veto</h1>
+  <p class="status">Peer-to-peer, no server. Create a lobby, send one link per
+   team, and veto together in real time.</p>
+
+  <div class="row">
+    <div><h2>Format</h2>
+      <label><input type="radio" name="mode" value="bo1" checked> Best of 1 (Premier style — alternating bans)</label>
+      <label><input type="radio" name="mode" value="bo3"> Best of 3 (ban, ban, pick, pick, ban…)</label>
+    </div>
+    <div><h2>Who bans first</h2>
+      <label><input type="radio" name="first" value="random" checked> Random</label>
+      <label><input type="radio" name="first" value="A"> Team A</label>
+      <label><input type="radio" name="first" value="B"> Team B</label>
+    </div>
+  </div>
+
+  <h2>Team names</h2>
+  <div class="row">
+    <input type="text" id="nameA" placeholder="Team A">
+    <input type="text" id="nameB" placeholder="Team B">
+  </div>
+
+  <h2>Your role</h2>
+  <label><input type="radio" name="role" value="A" checked> I'm captain of Team A (you veto for A; send Team B their link)</label>
+  <label><input type="radio" name="role" value="B"> I'm captain of Team B</label>
+  <label><input type="radio" name="role" value="spec"> I'm just organizing (send a link to both teams)</label>
+
+  <h2>Map pool</h2>
+  <div class="maps-pick" id="mapsPick"></div>
+
+  <label style="margin-top:12px"><input type="checkbox" id="sidePick" checked>
+   Add a side (CT/T) pick after maps are locked</label>
+
+  <p><button id="createBtn">Create lobby</button></p>
+  <div class="err" id="createErr"></div>
+  <div id="links"></div>
+</div>
+
+<!-- ===================== LOBBY VIEW ===================== -->
+<div id="lobbyView" class="hidden">
+  <div id="hostBanner"></div>
+  <div class="bar">
+    <h2 id="title">CS2 Map Veto</h2>
+    <div id="me"></div>
+  </div>
+  <div class="status" id="conn">Connecting…</div>
+  <div class="turn" id="turn"></div>
+  <div class="err" id="err"></div>
+  <div class="maps" id="maps"></div>
+  <div id="result"></div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+// ====================================================================
+// Map pool & veto engine (runs in the HOST browser, authoritative)
+// ====================================================================
+const MAP_POOL = {
+  de_ancient:"Ancient", de_anubis:"Anubis", de_dust2:"Dust II",
+  de_inferno:"Inferno", de_mirage:"Mirage", de_nuke:"Nuke",
+  de_train:"Train", de_overpass:"Overpass", de_vertigo:"Vertigo"
+};
+const DEFAULT_MAPS = ["de_ancient","de_anubis","de_dust2","de_inferno",
+                      "de_mirage","de_nuke","de_train"];
+const disp = n => MAP_POOL[n] || n;
+const other = t => t === "A" ? "B" : "A";
+
+function buildMapSteps(n, mode, first){
+  let actions;
+  if(mode === "bo1"){ actions = Array(n-1).fill("ban"); }
+  else {
+    actions = ["ban","ban","pick","pick"];
+    const trailing = (n-4)-1;
+    for(let i=0;i<trailing;i++) actions.push("ban");
+  }
+  const steps = []; let team = first;
+  for(const a of actions){ steps.push({team, action:a}); team = other(team); }
+  return steps;
+}
+
+function newLobby(cfg){
+  let first = cfg.first;
+  if(first === "random") first = Math.random() < .5 ? "A" : "B";
+  return {
+    mode: cfg.mode, first, side_pick: cfg.side_pick,
+    team_names: {A: cfg.names.A || "Team A", B: cfg.names.B || "Team B"},
+    maps: cfg.maps.map(m => ({name:m, status:"available"})),
+    steps: buildMapSteps(cfg.maps.length, cfg.mode, first),
+    step_index: 0, phase: "veto", result: [],
+    side_steps: [], side_index: 0, log: []
+  };
+}
+
+const findMap = (L,n) => L.maps.find(m => m.name === n);
+
+function applyMapAction(L, team, name){
+  if(L.phase !== "veto") return "Veto phase is over.";
+  const step = L.steps[L.step_index];
+  if(step.team !== team) return "It is not your turn.";
+  const m = findMap(L, name);
+  if(!m || m.status !== "available") return "That map is not available.";
+  if(step.action === "ban"){ m.status = "banned"; }
+  else { m.status = "picked_"+team;
+         L.result.push({name, picked_by:team, side:null, side_by:null}); }
+  L.log.push({team, action:step.action, map:name});
+  L.step_index++;
+  if(L.step_index >= L.steps.length) finalizeMapPhase(L);
+  return null;
+}
+
+function finalizeMapPhase(L){
+  for(const m of L.maps) if(m.status === "available"){
+    m.status = "decider";
+    L.result.push({name:m.name, picked_by:null, side:null, side_by:null});
+  }
+  if(!L.side_pick){ L.phase = "done"; return; }
+  let lastBan = null;
+  for(const s of L.steps) if(s.action === "ban") lastBan = s.team;
+  L.side_steps = L.result.map(r => ({
+    team: r.picked_by ? other(r.picked_by) : other(lastBan || "A"),
+    map: r.name
+  }));
+  L.side_index = 0; L.phase = "side";
+}
+
+function applySide(L, team, side){
+  if(L.phase !== "side") return "Not in the side-pick phase.";
+  const step = L.side_steps[L.side_index];
+  if(step.team !== team) return "It is not your turn to pick a side.";
+  if(side !== "CT" && side !== "T") return "Invalid side.";
+  const r = L.result.find(x => x.name === step.map);
+  r.side = side; r.side_by = team;
+  L.log.push({team, action:"side", map:step.map, side});
+  L.side_index++;
+  if(L.side_index >= L.side_steps.length) L.phase = "done";
+  return null;
+}
+
+function currentAction(L){
+  if(L.phase === "veto"){ const s = L.steps[L.step_index];
+    return {team:s.team, action:s.action, map:null}; }
+  if(L.phase === "side"){ const s = L.side_steps[L.side_index];
+    return {team:s.team, action:"side", map:s.map}; }
+  return null;
+}
+
+function stateFor(L){
+  return {
+    mode:L.mode, phase:L.phase, first:L.first, side_pick:L.side_pick,
+    team_names:L.team_names,
+    maps:L.maps.map(m => ({name:m.name, display:disp(m.name), status:m.status})),
+    current: currentAction(L),
+    result: L.result.map(r => ({name:r.name, display:disp(r.name),
+      picked_by:r.picked_by, side:r.side, side_by:r.side_by})),
+    log: L.log.map(l => ({team:l.team, action:l.action, map:l.map,
+      display:disp(l.map), side:l.side || null}))
+  };
+}
+
+// ====================================================================
+// Networking (PeerJS / WebRTC)
+// ====================================================================
+const qs = new URLSearchParams(location.search);
+const slug = () => Math.random().toString(36).slice(2,8);
+
+// ----- HOST role: build create UI -----
+function initCreate(){
+  const mp = document.getElementById("mapsPick");
+  for(const [k,v] of Object.entries(MAP_POOL)){
+    const c = DEFAULT_MAPS.includes(k) ? "checked" : "";
+    mp.insertAdjacentHTML("beforeend",
+      `<label><input type="checkbox" value="${k}" ${c}> ${v}</label>`);
+  }
+  document.getElementById("createBtn").onclick = startHost;
+}
+
+let HOST = null; // {lobby, conns: {A,B}, role, tokens, you}
+
+function startHost(){
+  document.getElementById("createErr").textContent = "";
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  const first = document.querySelector('input[name=first]:checked').value;
+  const role = document.querySelector('input[name=role]:checked').value;
+  const side_pick = document.getElementById("sidePick").checked;
+  const maps = [...document.querySelectorAll('#mapsPick input:checked')].map(c=>c.value);
+  if(mode === "bo1" && maps.length < 2)
+    return fail("Pick at least 2 maps for BO1.");
+  if(mode === "bo3" && maps.length < 5)
+    return fail("Pick at least 5 maps for BO3.");
+
+  const lobby = newLobby({mode, first, side_pick, maps,
+    names:{A:nameA.value, B:nameB.value}});
+  const hostId = "cs2veto-" + slug() + slug();
+  const tokens = {A: slug()+slug(), B: slug()+slug()};
+  HOST = {lobby, conns:{A:null,B:null}, role, tokens, you: role};
+
+  const peer = new Peer(hostId);
+  peer.on("open", () => showLinks(hostId, tokens, role, lobby));
+  peer.on("error", e => fail("Connection broker error: " + e.type +
+    ". Refresh and try again."));
+  peer.on("connection", conn => {
+    conn.on("data", d => handleHostData(conn, d));
+    conn.on("close", () => {
+      for(const t of ["A","B"]) if(HOST.conns[t] === conn) HOST.conns[t] = null;
+    });
+  });
+
+  function fail(m){ document.getElementById("createErr").textContent = m; }
+}
+
+function showLinks(hostId, tokens, role, lobby){
+  const base = location.origin + location.pathname;
+  const linkFor = t => `${base}?host=${hostId}&team=${t}&token=${tokens[t]}`;
+  let html = `<h2>Lobby ready — first ban: ${lobby.team_names[lobby.first]}</h2>
+    <div class="banner">⚠️ Keep this tab open — your browser is hosting the
+    veto. If you close it, the lobby ends.</div>`;
+  const teamsToSend = role === "spec" ? ["A","B"] : [other(role)];
+  for(const t of teamsToSend){
+    const url = linkFor(t);
+    html += `<div class="linkbox"><b>Send to ${lobby.team_names[t]}:</b><br>
+      <a href="${url}">${url}</a>
+      <button class="small" onclick="navigator.clipboard.writeText('${url}')">copy</button></div>`;
+  }
+  html += `<p><button onclick="enterAsHost()">Continue to veto board</button></p>`;
+  document.getElementById("links").innerHTML = html;
+}
+
+function enterAsHost(){
+  document.getElementById("createView").classList.add("hidden");
+  document.getElementById("lobbyView").classList.remove("hidden");
+  document.getElementById("hostBanner").innerHTML =
+    `<div class="banner">You are hosting this lobby — keep this tab open.</div>`;
+  YOU = HOST.role; renderState(stateFor(HOST.lobby));
+  document.getElementById("conn").textContent =
+    HOST.role === "spec" ? "Hosting (spectator)." : "Hosting — you play as " +
+    HOST.lobby.team_names[HOST.role] + ".";
+}
+
+function handleHostData(conn, d){
+  const L = HOST.lobby;
+  if(d.type === "join"){
+    if(d.team !== "A" && d.team !== "B"){ conn.send({type:"error",
+      message:"Bad team."}); return; }
+    if(d.token !== HOST.tokens[d.team]){ conn.send({type:"error",
+      message:"Invalid invite link."}); return; }
+    HOST.conns[d.team] = conn;
+    conn.send({type:"state", state: stateFor(L)});
+    return;
+  }
+  // figure out which team this connection belongs to
+  let team = null;
+  for(const t of ["A","B"]) if(HOST.conns[t] === conn) team = t;
+  if(!team) return;
+  let err = null;
+  if(d.type === "pick") err = applyMapAction(L, team, d.map);
+  else if(d.type === "side") err = applySide(L, team, d.side);
+  if(err) conn.send({type:"error", message:err});
+  else broadcastHost();
+}
+
+function broadcastHost(){
+  const st = stateFor(HOST.lobby);
+  for(const t of ["A","B"]){ const c = HOST.conns[t];
+    if(c && c.open) c.send({type:"state", state:st}); }
+  renderState(st); // update host's own board
+}
+
+// host acting locally for its own team (clicking the board)
+function hostLocalAction(msg){
+  if(HOST.role !== "A" && HOST.role !== "B") return;
+  let err = null;
+  if(msg.type === "pick") err = applyMapAction(HOST.lobby, HOST.role, msg.map);
+  else if(msg.type === "side") err = applySide(HOST.lobby, HOST.role, msg.side);
+  if(err) document.getElementById("err").textContent = err;
+  else broadcastHost();
+}
+
+// ----- CLIENT role: connect to host -----
+let CLIENT = null, YOU = "spec";
+function initClient(hostId, team, token){
+  document.getElementById("createView").classList.add("hidden");
+  document.getElementById("lobbyView").classList.remove("hidden");
+  YOU = team;
+  const peer = new Peer();
+  const setStatus = m => document.getElementById("conn").textContent = m;
+  setStatus("Connecting to the host…");
+  peer.on("open", () => {
+    const conn = peer.connect(hostId, {reliable:true});
+    CLIENT = conn;
+    conn.on("open", () => { conn.send({type:"join", team, token});
+      setStatus("Connected."); });
+    conn.on("data", d => {
+      if(d.type === "error"){ document.getElementById("err").textContent = d.message; return; }
+      if(d.type === "state"){ document.getElementById("err").textContent="";
+        renderState(d.state); }
+    });
+    conn.on("close", () => setStatus("Disconnected — the host may have closed their tab."));
+    conn.on("error", () => setStatus("Could not reach the host. Ask them to keep their tab open, then refresh."));
+  });
+  peer.on("error", e => {
+    if(e.type === "peer-unavailable")
+      setStatus("Host is offline. Ask them to keep their tab open, then refresh this page.");
+    else setStatus("Network error (" + e.type + "). Refresh to retry.");
+  });
+}
+
+function sendAction(msg){
+  document.getElementById("err").textContent = "";
+  if(HOST){ hostLocalAction(msg); }      // host clicking its own board
+  else if(CLIENT && CLIENT.open){ CLIENT.send(msg); }
+}
+
+// ====================================================================
+// Rendering (shared by host board and clients)
+// ====================================================================
+function renderState(S){
+  const tn = S.team_names;
+  document.getElementById("title").textContent =
+    `${tn.A}  vs  ${tn.B}  ·  ${S.mode.toUpperCase()}`;
+  document.getElementById("me").innerHTML = YOU === "spec" ? "<i>spectating</i>"
+    : `You are <span class="teamtag" style="background:${YOU==='A'?'#1c2a20':'#2a261c'}">${tn[YOU]}</span>`;
+
+  const t = document.getElementById("turn");
+  if(S.phase === "done"){ t.textContent = "✅ Veto complete"; }
+  else if(S.current){
+    const cur = S.current, who = tn[cur.team], mine = cur.team === YOU;
+    const verb = cur.action === "ban" ? "ban a map"
+      : cur.action === "pick" ? "pick a map"
+      : `pick a side on ${dispOf(S, cur.map)}`;
+    t.textContent = (mine ? "➡️ Your turn — " : `Waiting for ${who} to `) + verb;
+  } else { t.textContent = ""; }
+
+  const mine = S.current && S.current.team === YOU;
+  const md = document.getElementById("maps"); md.innerHTML = "";
+  for(const m of S.maps){
+    const clickable = mine && S.phase === "veto" && m.status === "available";
+    const tag = m.status === "banned" ? "banned"
+      : m.status === "picked_A" ? "pick "+tn.A
+      : m.status === "picked_B" ? "pick "+tn.B
+      : m.status === "decider" ? "decider" : "";
+    const el = document.createElement("div");
+    el.className = `map ${m.status} ${clickable?"mine":""}`;
+    el.innerHTML = `${m.display}<span class="tag">${tag}</span>`;
+    if(clickable) el.onclick = () => sendAction({type:"pick", map:m.name});
+    md.appendChild(el);
+  }
+
+  if(S.phase === "side" && S.current && S.current.team === YOU){
+    document.getElementById("result").innerHTML =
+      `<div class="result"><b>Pick your starting side on
+       ${dispOf(S, S.current.map)}</b><div class="side">
+       <button onclick='sendAction({type:"side",side:"CT"})'>CT</button>
+       <button onclick='sendAction({type:"side",side:"T"})'>T</button></div></div>`;
+  } else { renderResult(S); }
+  renderLog(S);
+}
+const dispOf = (S,n) => { const m = S.maps.find(x=>x.name===n); return m?m.display:n; };
+
+function renderResult(S){
+  const r = document.getElementById("result");
+  if(!S.result.length){ r.innerHTML = ""; return; }
+  let h = '<div class="result"><b>Maps to play</b><ol>';
+  for(const m of S.result){
+    const extra = m.picked_by ? ` (pick — ${S.team_names[m.picked_by]})` : " (decider)";
+    const side = m.side ? ` · ${S.team_names[m.side_by]} starts ${m.side}` : "";
+    h += `<li>${m.display}${extra}${side}</li>`;
+  }
+  r.innerHTML = h + "</ol></div>";
+}
+function renderLog(S){
+  document.getElementById("log").innerHTML = S.log.map(e=>{
+    const who = S.team_names[e.team];
+    if(e.action === "side") return "• " + `${who} picked ${e.side} on ${e.display}`;
+    return "• " + `${who} ${e.action==="ban"?"banned":"picked"} ${e.display}`;
+  }).join("<br>");
+}
+
+// ====================================================================
+// Boot: decide create vs client based on the URL
+// ====================================================================
+if(qs.get("host")){
+  initClient(qs.get("host"), qs.get("team") || "spec", qs.get("token") || "");
+} else {
+  initCreate();
+}
+</script>
+</body>
+</html>
