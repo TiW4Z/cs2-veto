@@ -32,9 +32,16 @@ input[type=text]{background:#1f232b;border:1px solid #2c313c;color:#e7e9ee;
 button{background:#3b5bdb;color:#fff;border:0;border-radius:8px;padding:10px 16px;
  font-size:15px;cursor:pointer}
 button.small{padding:4px 10px;font-size:12px;background:#2c313c}
-.maps-pick{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-.maps-pick label{background:#1f232b;border:1px solid #2c313c;border-radius:8px;
- padding:8px 10px;cursor:pointer}
+.maps-pick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.maps-pick label{position:relative;display:block;background:#1f232b;
+ border:2px solid #2c313c;border-radius:8px;overflow:hidden;cursor:pointer}
+.maps-pick label:has(input:checked){border-color:#3b5bdb}
+.maps-pick img{width:100%;height:58px;object-fit:cover;display:block;
+ opacity:.55;transition:.1s}
+.maps-pick label:has(input:checked) img{opacity:1}
+.maps-pick .cap{display:flex;align-items:center;gap:6px;padding:5px 8px;
+ font-size:13px}
+.maps-pick input{margin:0}
 .linkbox{background:#1f232b;border:1px solid #2c313c;border-radius:8px;
  padding:10px;margin:8px 0;word-break:break-all}
 .banner{background:#2b3a67;border:1px solid #3b5bdb;border-radius:8px;
@@ -66,6 +73,22 @@ button.small{padding:4px 10px;font-size:12px;background:#2c313c}
 .log{font-size:13px;color:#9aa3b2;margin-top:14px;max-height:160px;overflow:auto}
 .err{color:#ff8787;min-height:18px}
 .status{font-size:13px;color:#9aa3b2}
+button:disabled{opacity:.5;cursor:default}
+.roster{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 10px}
+.pcard{background:#1f232b;border:1px solid #2c313c;border-radius:8px;
+ padding:8px 12px;font-size:14px}
+.pcard.on{border-color:#8ce99a}
+.coinwrap{display:flex;flex-direction:column;align-items:center;gap:14px;
+ padding:18px 0}
+.coin{width:120px;height:120px;position:relative;transform-style:preserve-3d;
+ transition:transform 2.6s cubic-bezier(.15,.65,.2,1)}
+.coin .face{position:absolute;inset:0;border-radius:50%;display:flex;
+ align-items:center;justify-content:center;text-align:center;padding:6px;
+ font-size:17px;font-weight:800;backface-visibility:hidden;
+ border:5px solid rgba(255,255,255,.25);box-shadow:0 6px 24px rgba(0,0,0,.5)}
+.coin .front{background:#1c2a20;color:#8ce99a}
+.coin .back{background:#2a261c;color:#ffd43b;transform:rotateY(180deg)}
+.coinres{font-size:19px;font-weight:700;min-height:24px}
 </style>
 </head>
 <body>
@@ -120,6 +143,7 @@ button.small{padding:4px 10px;font-size:12px;background:#2c313c}
   <div class="status" id="conn">Connecting…</div>
   <div class="turn" id="turn"></div>
   <div class="err" id="err"></div>
+  <div id="coinArea"></div>
   <div class="maps" id="maps"></div>
   <div id="result"></div>
   <div class="log" id="log"></div>
@@ -160,8 +184,9 @@ function newLobby(cfg){
     team_names: {A: cfg.names.A || "Team A", B: cfg.names.B || "Team B"},
     maps: cfg.maps.map(m => ({name:m, status:"available"})),
     steps: buildMapSteps(cfg.maps.length, cfg.mode, first),
-    step_index: 0, phase: "veto", result: [],
-    side_steps: [], side_index: 0, log: []
+    step_index: 0, phase: "lobby", result: [],
+    side_steps: [], side_index: 0, log: [],
+    present: {A:false, B:false}
   };
 }
 
@@ -221,7 +246,7 @@ function currentAction(L){
 function stateFor(L){
   return {
     mode:L.mode, phase:L.phase, first:L.first, side_pick:L.side_pick,
-    team_names:L.team_names,
+    team_names:L.team_names, present:L.present || {A:false,B:false},
     maps:L.maps.map(m => ({name:m.name, display:disp(m.name), status:m.status})),
     current: currentAction(L),
     result: L.result.map(r => ({name:r.name, display:disp(r.name),
@@ -243,12 +268,29 @@ function initCreate(){
   for(const [k,v] of Object.entries(MAP_POOL)){
     const c = DEFAULT_MAPS.includes(k) ? "checked" : "";
     mp.insertAdjacentHTML("beforeend",
-      `<label><input type="checkbox" value="${k}" ${c}> ${v}</label>`);
+      `<label><img src="maps/${k}.png" alt="${v}" loading="lazy">
+        <span class="cap"><input type="checkbox" value="${k}" ${c}> ${v}</span></label>`);
   }
   document.getElementById("createBtn").onclick = startHost;
 }
 
-let HOST = null; // {lobby, conns: {A,B}, role, tokens, you}
+let HOST = null; // {lobby, conns:[{conn,team}], role, tokens, you}
+
+function updatePresence(){
+  const p = {A:false, B:false};
+  if(HOST.role === "A") p.A = true;
+  if(HOST.role === "B") p.B = true;
+  for(const e of HOST.conns){ if(e.team === "A") p.A = true;
+    if(e.team === "B") p.B = true; }
+  HOST.lobby.present = p;
+}
+
+function startVeto(){
+  if(!HOST || HOST.lobby.phase !== "lobby") return;
+  HOST.lobby.phase = "coinflip";
+  broadcastHost();
+  setTimeout(() => { HOST.lobby.phase = "veto"; broadcastHost(); }, 3200);
+}
 
 function startHost(){
   document.getElementById("createErr").textContent = "";
@@ -266,7 +308,8 @@ function startHost(){
     names:{A:nameA.value, B:nameB.value}});
   const hostId = "cs2veto-" + slug() + slug();
   const tokens = {A: slug()+slug(), B: slug()+slug()};
-  HOST = {lobby, conns:{A:null,B:null}, role, tokens, you: role};
+  HOST = {lobby, conns:[], role, tokens, you: role};
+  updatePresence();
 
   const peer = new Peer(hostId);
   peer.on("open", () => showLinks(hostId, tokens, role, lobby));
@@ -275,7 +318,8 @@ function startHost(){
   peer.on("connection", conn => {
     conn.on("data", d => handleHostData(conn, d));
     conn.on("close", () => {
-      for(const t of ["A","B"]) if(HOST.conns[t] === conn) HOST.conns[t] = null;
+      HOST.conns = HOST.conns.filter(e => e.conn !== conn);
+      updatePresence(); broadcastHost();
     });
   });
 
@@ -317,13 +361,14 @@ function handleHostData(conn, d){
       message:"Bad team."}); return; }
     if(d.token !== HOST.tokens[d.team]){ conn.send({type:"error",
       message:"Invalid invite link."}); return; }
-    HOST.conns[d.team] = conn;
-    conn.send({type:"state", state: stateFor(L)});
+    HOST.conns.push({conn, team: d.team});
+    updatePresence();
+    broadcastHost(); // refresh everyone's roster
     return;
   }
   // figure out which team this connection belongs to
-  let team = null;
-  for(const t of ["A","B"]) if(HOST.conns[t] === conn) team = t;
+  const entry = HOST.conns.find(e => e.conn === conn);
+  const team = entry ? entry.team : null;
   if(!team) return;
   let err = null;
   if(d.type === "pick") err = applyMapAction(L, team, d.map);
@@ -334,8 +379,7 @@ function handleHostData(conn, d){
 
 function broadcastHost(){
   const st = stateFor(HOST.lobby);
-  for(const t of ["A","B"]){ const c = HOST.conns[t];
-    if(c && c.open) c.send({type:"state", state:st}); }
+  for(const e of HOST.conns){ if(e.conn.open) e.conn.send({type:"state", state:st}); }
   renderState(st); // update host's own board
 }
 
@@ -395,19 +439,31 @@ function renderState(S){
     : `You are <span class="teamtag" style="background:${YOU==='A'?'#1c2a20':'#2a261c'}">${tn[YOU]}</span>`;
 
   const t = document.getElementById("turn");
-  if(S.phase === "done"){ t.textContent = "✅ Veto complete"; }
+  const md = document.getElementById("maps");
+  const res = document.getElementById("result");
+  const coinArea = document.getElementById("coinArea");
+
+  // coin-flip overlay
+  if(S.phase === "coinflip"){ showCoin(S.first, tn); }
+  else { coinArea.innerHTML = ""; coinAnimating = false; }
+
+  // turn banner
+  if(S.phase === "lobby"){ t.textContent = "Lobby — waiting to start"; }
+  else if(S.phase === "coinflip"){ t.textContent = "🪙 Flipping the coin…"; }
+  else if(S.phase === "done"){ t.textContent = "✅ Veto complete"; }
   else if(S.current){
-    const cur = S.current, who = tn[cur.team], mine = cur.team === YOU;
+    const cur = S.current, who = tn[cur.team], myturn = cur.team === YOU;
     const verb = cur.action === "ban" ? "ban a map"
       : cur.action === "pick" ? "pick a map"
       : `pick a side on ${dispOf(S, cur.map)}`;
-    t.textContent = (mine ? "➡️ Your turn — " : `Waiting for ${who} to `) + verb;
+    t.textContent = (myturn ? "➡️ Your turn — " : `Waiting for ${who} to `) + verb;
   } else { t.textContent = ""; }
 
-  const mine = S.current && S.current.team === YOU;
-  const md = document.getElementById("maps"); md.innerHTML = "";
+  // map grid (clickable only on your veto turn)
+  const mine = S.phase === "veto" && S.current && S.current.team === YOU;
+  md.innerHTML = "";
   for(const m of S.maps){
-    const clickable = mine && S.phase === "veto" && m.status === "available";
+    const clickable = mine && m.status === "available";
     const tag = m.status === "banned" ? "banned"
       : m.status === "picked_A" ? "pick "+tn.A
       : m.status === "picked_B" ? "pick "+tn.B
@@ -421,14 +477,49 @@ function renderState(S){
     md.appendChild(el);
   }
 
-  if(S.phase === "side" && S.current && S.current.team === YOU){
-    document.getElementById("result").innerHTML =
+  // bottom area: roster (lobby) / side controls / result
+  if(S.phase === "lobby"){
+    res.innerHTML = renderRoster(S);
+  } else if(S.phase === "side" && S.current && S.current.team === YOU){
+    res.innerHTML =
       `<div class="result"><b>Pick your starting side on
        ${dispOf(S, S.current.map)}</b><div class="side">
        <button onclick='sendAction({type:"side",side:"CT"})'>CT</button>
        <button onclick='sendAction({type:"side",side:"T"})'>T</button></div></div>`;
   } else { renderResult(S); }
   renderLog(S);
+}
+
+function renderRoster(S){
+  const p = S.present || {A:false,B:false}, tn = S.team_names;
+  let h = `<div class="roster">
+    <div class="pcard ${p.A?'on':''}">${tn.A}: ${p.A?'✅ connected':'⏳ waiting'}</div>
+    <div class="pcard ${p.B?'on':''}">${tn.B}: ${p.B?'✅ connected':'⏳ waiting'}</div>
+   </div>`;
+  if(HOST){
+    const ready = p.A && p.B;
+    h += `<button onclick="startVeto()" ${ready?'':'disabled'}>`+
+         `${ready?'Start veto':'Waiting for both teams…'}</button>`;
+  } else {
+    h += `<div class="status">Waiting for the host to start the veto…</div>`;
+  }
+  return h;
+}
+
+let coinAnimating = false;
+function showCoin(first, tn){
+  if(coinAnimating) return;
+  coinAnimating = true;
+  document.getElementById("coinArea").innerHTML =
+    `<div class="coinwrap"><div class="coin" id="coin">
+       <div class="face front">${tn.A}</div>
+       <div class="face back">${tn.B}</div></div>
+     <div class="coinres" id="coinres">&nbsp;</div></div>`;
+  const coin = document.getElementById("coin");
+  const target = 360*5 + (first === "A" ? 0 : 180);
+  requestAnimationFrame(() => { coin.style.transform = `rotateY(${target}deg)`; });
+  setTimeout(() => { const r = document.getElementById("coinres");
+    if(r) r.textContent = `🪙 ${tn[first]} bans first!`; }, 2700);
 }
 const dispOf = (S,n) => { const m = S.maps.find(x=>x.name===n); return m?m.display:n; };
 
