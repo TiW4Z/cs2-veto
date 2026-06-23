@@ -7,7 +7,13 @@ browsers talk directly to each other over WebRTC.
 - **BO1** (Premier style — alternating bans to one map) or **BO3**
   (ban, ban, pick, pick, ban…) — chosen when creating the lobby.
 - One **invite link per team** (or play as one team and send a single link).
-- Optional **side (CT/T) pick** after maps are locked.
+  The same link can be shared with a **whole team — up to ~10 people total**
+  can connect.
+- **Team voting:** on a team's turn, every connected player votes for the map
+  (live tally shown). A **30-second timer** runs; when it expires the leading
+  map locks (ties broken randomly). A solo/1v1 team locks instantly.
+- A **coin-flip animation** reveals who bans first when the host starts the veto.
+- Optional **side (CT/T) pick** after maps are locked (also a team vote).
 
 ## How it connects (and why there's no server)
 
@@ -31,9 +37,11 @@ run or pay for.
 
 1. The host opens the page and clicks **Create lobby** (pick format, maps, who
    bans first, and your role).
-2. They get an invite link for the other team. Send it (Discord/DM/etc).
-3. The other captain opens the link → connects automatically → you veto in real
-   time. The host keeps their tab open until the veto is done.
+2. They get an invite link per team. Send each team their link (Discord/DM/etc).
+   Everyone on a team can open the same link.
+3. Players open the link → connect automatically. When both teams show
+   "connected", the host clicks **Start veto** → a coin flip reveals who bans
+   first → teams vote each turn. The host keeps their tab open until it's done.
 
 ## Putting it online (one time, free)
 

@@ -89,6 +89,12 @@ button:disabled{opacity:.5;cursor:default}
 .coin .front{background:#1c2a20;color:#8ce99a}
 .coin .back{background:#2a261c;color:#ffd43b;transform:rotateY(180deg)}
 .coinres{font-size:19px;font-weight:700;min-height:24px}
+.map.myvote{outline:3px solid #8ce99a;outline-offset:-3px}
+.vbadge{position:absolute;top:6px;left:7px;font-size:12px;font-weight:700;
+ padding:2px 7px;border-radius:5px;background:rgba(59,91,219,.92);text-shadow:none}
+.sidevote{display:flex;gap:10px;margin-top:8px}
+.sidevote button.myvote{outline:3px solid #8ce99a}
+.sidevote .vc{margin-left:6px;opacity:.85}
 </style>
 </head>
 <body>
@@ -142,6 +148,7 @@ button:disabled{opacity:.5;cursor:default}
   </div>
   <div class="status" id="conn">Connecting…</div>
   <div class="turn" id="turn"></div>
+  <div class="status" id="timer"></div>
   <div class="err" id="err"></div>
   <div id="coinArea"></div>
   <div class="maps" id="maps"></div>
@@ -186,7 +193,7 @@ function newLobby(cfg){
     steps: buildMapSteps(cfg.maps.length, cfg.mode, first),
     step_index: 0, phase: "lobby", result: [],
     side_steps: [], side_index: 0, log: [],
-    present: {A:false, B:false}
+    present: {A:false, B:false}, votes: {}, deadline: null
   };
 }
 
@@ -243,6 +250,20 @@ function currentAction(L){
   return null;
 }
 
+// The active team's current decision, as a vote with a set of options.
+function voteContext(L){
+  if(L.phase === "veto"){
+    const s = L.steps[L.step_index];
+    const opts = L.maps.filter(m => m.status === "available").map(m => m.name);
+    return {team:s.team, kind:"map", action:s.action, options:opts, map:null};
+  }
+  if(L.phase === "side"){
+    const s = L.side_steps[L.side_index];
+    return {team:s.team, kind:"side", action:"side", options:["CT","T"], map:s.map};
+  }
+  return null;
+}
+
 function stateFor(L){
   return {
     mode:L.mode, phase:L.phase, first:L.first, side_pick:L.side_pick,
@@ -289,7 +310,63 @@ function startVeto(){
   if(!HOST || HOST.lobby.phase !== "lobby") return;
   HOST.lobby.phase = "coinflip";
   broadcastHost();
-  setTimeout(() => { HOST.lobby.phase = "veto"; broadcastHost(); }, 3200);
+  setTimeout(() => { HOST.lobby.phase = "veto"; beginVote(); }, 3200);
+}
+
+const VOTE_SECONDS = 30;
+
+// voter keys = each connected player on a team (+ the host if they're on it)
+function activeVoterKeys(team){
+  const keys = HOST.conns.filter(e => e.team === team).map(e => e.conn.peer);
+  if(HOST.role === team) keys.push("HOST");
+  return keys;
+}
+
+function beginVote(){
+  const L = HOST.lobby;
+  L.votes = {};
+  const ctx = voteContext(L);
+  if(!ctx){ L.deadline = null; broadcastHost(); return; }
+  L.deadline = Date.now() + VOTE_SECONDS * 1000;
+  clearTimeout(HOST.timer);
+  HOST.timer = setTimeout(lockVote, VOTE_SECONDS * 1000);
+  broadcastHost();
+}
+
+function recordVote(team, voterKey, choice){
+  const L = HOST.lobby;
+  const ctx = voteContext(L);
+  if(!ctx || ctx.team !== team) return "It's not your team's turn.";
+  if(!ctx.options.includes(choice)) return "That option isn't available.";
+  L.votes[voterKey] = choice;
+  const keys = activeVoterKeys(team);
+  const allVoted = keys.length > 0 && keys.every(k => k in L.votes);
+  broadcastHost();
+  // Solo team (e.g. 1v1 / testing): lock instantly. Multi-person teams keep
+  // the full 30s window so players can deliberate and change their vote.
+  if(keys.length <= 1 && allVoted) lockVote();
+  return null;
+}
+
+function lockVote(){
+  const L = HOST.lobby;
+  clearTimeout(HOST.timer);
+  const ctx = voteContext(L);
+  if(!ctx) return;
+  const counts = {};
+  for(const o of ctx.options) counts[o] = 0;
+  for(const k in L.votes) if(L.votes[k] in counts) counts[L.votes[k]]++;
+  let max = -1, leaders = [];
+  for(const o of ctx.options){
+    if(counts[o] > max){ max = counts[o]; leaders = [o]; }
+    else if(counts[o] === max){ leaders.push(o); }
+  }
+  const winner = leaders[Math.floor(Math.random() * leaders.length)];
+  if(ctx.kind === "map") applyMapAction(L, ctx.team, winner);
+  else applySide(L, ctx.team, winner);
+  L.votes = {};
+  if(voteContext(L)) beginVote();          // next decision
+  else { L.deadline = null; broadcastHost(); }  // veto finished
 }
 
 function startHost(){
@@ -348,7 +425,7 @@ function enterAsHost(){
   document.getElementById("lobbyView").classList.remove("hidden");
   document.getElementById("hostBanner").innerHTML =
     `<div class="banner">You are hosting this lobby — keep this tab open.</div>`;
-  YOU = HOST.role; renderState(stateFor(HOST.lobby));
+  YOU = HOST.role; renderState(buildState());
   document.getElementById("conn").textContent =
     HOST.role === "spec" ? "Hosting (spectator)." : "Hosting — you play as " +
     HOST.lobby.team_names[HOST.role] + ".";
@@ -370,31 +447,46 @@ function handleHostData(conn, d){
   const entry = HOST.conns.find(e => e.conn === conn);
   const team = entry ? entry.team : null;
   if(!team) return;
-  let err = null;
-  if(d.type === "pick") err = applyMapAction(L, team, d.map);
-  else if(d.type === "side") err = applySide(L, team, d.side);
-  if(err) conn.send({type:"error", message:err});
-  else broadcastHost();
+  if(d.type === "vote"){
+    const err = recordVote(team, conn.peer, d.choice);
+    if(err) conn.send({type:"error", message:err});
+  }
+}
+
+function buildState(){
+  const L = HOST.lobby;
+  const st = stateFor(L);
+  const ctx = voteContext(L);
+  if(ctx){
+    const tally = {};
+    for(const o of ctx.options) tally[o] = 0;
+    for(const k in L.votes) if(L.votes[k] in tally) tally[L.votes[k]]++;
+    st.tally = tally;
+    st.votes = L.votes;            // voterKey -> choice (for self-highlight)
+    st.deadline = L.deadline;
+    st.voters = activeVoterKeys(ctx.team).length;
+    st.voted = Object.keys(L.votes).length;
+  }
+  return st;
 }
 
 function broadcastHost(){
-  const st = stateFor(HOST.lobby);
+  const st = buildState();
   for(const e of HOST.conns){ if(e.conn.open) e.conn.send({type:"state", state:st}); }
   renderState(st); // update host's own board
 }
 
-// host acting locally for its own team (clicking the board)
+// host voting locally for its own team (clicking the board)
 function hostLocalAction(msg){
   if(HOST.role !== "A" && HOST.role !== "B") return;
-  let err = null;
-  if(msg.type === "pick") err = applyMapAction(HOST.lobby, HOST.role, msg.map);
-  else if(msg.type === "side") err = applySide(HOST.lobby, HOST.role, msg.side);
-  if(err) document.getElementById("err").textContent = err;
-  else broadcastHost();
+  if(msg.type === "vote"){
+    const err = recordVote(HOST.role, "HOST", msg.choice);
+    if(err) document.getElementById("err").textContent = err;
+  }
 }
 
 // ----- CLIENT role: connect to host -----
-let CLIENT = null, YOU = "spec";
+let CLIENT = null, YOU = "spec", MYKEY = "HOST", VOTE_DEADLINE = null;
 function initClient(hostId, team, token){
   document.getElementById("createView").classList.add("hidden");
   document.getElementById("lobbyView").classList.remove("hidden");
@@ -403,6 +495,7 @@ function initClient(hostId, team, token){
   const setStatus = m => document.getElementById("conn").textContent = m;
   setStatus("Connecting to the host…");
   peer.on("open", () => {
+    MYKEY = peer.id;
     const conn = peer.connect(hostId, {reliable:true});
     CLIENT = conn;
     conn.on("open", () => { conn.send({type:"join", team, token});
@@ -447,47 +540,65 @@ function renderState(S){
   if(S.phase === "coinflip"){ showCoin(S.first, tn); }
   else { coinArea.innerHTML = ""; coinAnimating = false; }
 
+  // countdown deadline (read by the global ticker)
+  VOTE_DEADLINE = (S.deadline && (S.phase === "veto" || S.phase === "side"))
+    ? S.deadline : null;
+
   // turn banner
+  const myteam = S.current && S.current.team === YOU;
   if(S.phase === "lobby"){ t.textContent = "Lobby — waiting to start"; }
   else if(S.phase === "coinflip"){ t.textContent = "🪙 Flipping the coin…"; }
   else if(S.phase === "done"){ t.textContent = "✅ Veto complete"; }
   else if(S.current){
-    const cur = S.current, who = tn[cur.team], myturn = cur.team === YOU;
-    const verb = cur.action === "ban" ? "ban a map"
-      : cur.action === "pick" ? "pick a map"
-      : `pick a side on ${dispOf(S, cur.map)}`;
-    t.textContent = (myturn ? "➡️ Your turn — " : `Waiting for ${who} to `) + verb;
+    const who = tn[S.current.team];
+    const noun = S.current.action === "ban" ? "ban a map"
+      : S.current.action === "pick" ? "pick a map"
+      : `pick a side on ${dispOf(S, S.current.map)}`;
+    const tally = (S.voted != null) ? ` (${S.voted}/${S.voters} voted)` : "";
+    t.textContent = (myteam ? `➡️ Your team is voting to ${noun}`
+                            : `${who} is voting to ${noun}`) + tally;
   } else { t.textContent = ""; }
 
-  // map grid (clickable only on your veto turn)
-  const mine = S.phase === "veto" && S.current && S.current.team === YOU;
+  // map grid — during your team's veto turn, clicking casts/changes your vote
+  const canVoteMap = S.phase === "veto" && myteam;
+  const myChoice = S.votes ? S.votes[MYKEY] : null;
   md.innerHTML = "";
   for(const m of S.maps){
-    const clickable = mine && m.status === "available";
+    const clickable = canVoteMap && m.status === "available";
     const tag = m.status === "banned" ? "banned"
       : m.status === "picked_A" ? "pick "+tn.A
       : m.status === "picked_B" ? "pick "+tn.B
       : m.status === "decider" ? "decider" : "";
+    const count = S.tally ? (S.tally[m.name] || 0) : 0;
     const el = document.createElement("div");
-    el.className = `map ${m.status} ${clickable?"mine":""}`;
+    el.className = `map ${m.status} ${clickable?"mine":""} ${myChoice===m.name?"myvote":""}`;
     el.style.backgroundImage = `url("maps/${m.name}.png")`;
     el.innerHTML = (tag ? `<span class="tag">${tag}</span>` : "") +
+      (count > 0 ? `<span class="vbadge">🗳 ${count}</span>` : "") +
       `<span class="name">${m.display}</span>`;
-    if(clickable) el.onclick = () => sendAction({type:"pick", map:m.name});
+    if(clickable) el.onclick = () => sendAction({type:"vote", choice:m.name});
     md.appendChild(el);
   }
 
-  // bottom area: roster (lobby) / side controls / result
-  if(S.phase === "lobby"){
-    res.innerHTML = renderRoster(S);
-  } else if(S.phase === "side" && S.current && S.current.team === YOU){
-    res.innerHTML =
-      `<div class="result"><b>Pick your starting side on
-       ${dispOf(S, S.current.map)}</b><div class="side">
-       <button onclick='sendAction({type:"side",side:"CT"})'>CT</button>
-       <button onclick='sendAction({type:"side",side:"T"})'>T</button></div></div>`;
-  } else { renderResult(S); }
+  // bottom area
+  if(S.phase === "lobby"){ res.innerHTML = renderRoster(S); }
+  else { res.innerHTML = (S.phase === "side" ? sidePanel(S) : "") + resultHtml(S); }
   renderLog(S);
+}
+
+function sidePanel(S){
+  const tn = S.team_names, map = dispOf(S, S.current.map);
+  const myteam = S.current.team === YOU;
+  const myChoice = S.votes ? S.votes[MYKEY] : null;
+  const btn = side => {
+    const c = S.tally ? (S.tally[side] || 0) : 0;
+    const click = myteam ? `onclick='sendAction({type:"vote",choice:"${side}"})'` : "disabled";
+    return `<button class="${myChoice===side?"myvote":""}" ${click}>`+
+           `${side}<span class="vc">${c}</span></button>`;
+  };
+  const who = myteam ? "Your team votes" : `${tn[S.current.team]} votes`;
+  return `<div class="result"><b>${who} the starting side on ${map}</b>
+    <div class="sidevote">${btn("CT")}${btn("T")}</div></div>`;
 }
 
 function renderRoster(S){
@@ -523,16 +634,15 @@ function showCoin(first, tn){
 }
 const dispOf = (S,n) => { const m = S.maps.find(x=>x.name===n); return m?m.display:n; };
 
-function renderResult(S){
-  const r = document.getElementById("result");
-  if(!S.result.length){ r.innerHTML = ""; return; }
+function resultHtml(S){
+  if(!S.result.length) return "";
   let h = '<div class="result"><b>Maps to play</b><ol>';
   for(const m of S.result){
     const extra = m.picked_by ? ` (pick — ${S.team_names[m.picked_by]})` : " (decider)";
     const side = m.side ? ` · ${S.team_names[m.side_by]} starts ${m.side}` : "";
     h += `<li>${m.display}${extra}${side}</li>`;
   }
-  r.innerHTML = h + "</ol></div>";
+  return h + "</ol></div>";
 }
 function renderLog(S){
   document.getElementById("log").innerHTML = S.log.map(e=>{
@@ -541,6 +651,16 @@ function renderLog(S){
     return "• " + `${who} ${e.action==="ban"?"banned":"picked"} ${e.display}`;
   }).join("<br>");
 }
+
+// per-second countdown ticker for the vote timer
+setInterval(() => {
+  const el = document.getElementById("timer");
+  if(!el) return;
+  if(VOTE_DEADLINE){
+    const s = Math.max(0, Math.ceil((VOTE_DEADLINE - Date.now()) / 1000));
+    el.textContent = "⏱ " + s + "s to vote";
+  } else { el.textContent = ""; }
+}, 250);
 
 // ====================================================================
 // Boot: decide create vs client based on the URL
