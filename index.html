@@ -79,17 +79,24 @@ button:disabled{opacity:.5;cursor:default}
 .pcard{background:#1f232b;border:1px solid #2c313c;border-radius:8px;
  padding:8px 12px;font-size:14px}
 .pcard.on{border-color:#8ce99a}
-.coinwrap{display:flex;flex-direction:column;align-items:center;gap:14px;
- padding:18px 0}
-.coin{width:120px;height:120px;position:relative;transform-style:preserve-3d;
- transition:transform 2.6s cubic-bezier(.15,.65,.2,1)}
+.coinwrap{display:flex;flex-direction:column;align-items:center;gap:16px;
+ padding:24px 0;perspective:1000px}
+.cointoss{animation:toss 2.6s cubic-bezier(.33,0,.4,1)}
+@keyframes toss{0%{transform:translateY(20px)}45%{transform:translateY(-110px)}
+ 100%{transform:translateY(0)}}
+.coin{width:150px;height:150px;position:relative;transform-style:preserve-3d;
+ transition:transform 2.6s cubic-bezier(.2,.75,.25,1)}
 .coin .face{position:absolute;inset:0;border-radius:50%;display:flex;
- align-items:center;justify-content:center;text-align:center;padding:6px;
- font-size:17px;font-weight:800;backface-visibility:hidden;
- border:5px solid rgba(255,255,255,.25);box-shadow:0 6px 24px rgba(0,0,0,.5)}
-.coin .front{background:#1c2a20;color:#8ce99a}
-.coin .back{background:#2a261c;color:#ffd43b;transform:rotateY(180deg)}
-.coinres{font-size:19px;font-weight:700;min-height:24px}
+ align-items:center;justify-content:center;text-align:center;padding:8px;
+ font-size:19px;font-weight:800;backface-visibility:hidden;
+ border:6px solid rgba(255,255,255,.16);
+ box-shadow:0 12px 34px rgba(0,0,0,.6), inset 0 0 22px rgba(0,0,0,.4)}
+.coin .front{background:radial-gradient(circle at 36% 30%,#2f5d3b,#13231a);color:#8ce99a}
+.coin .back{background:radial-gradient(circle at 36% 30%,#5c4b1f,#231c0f);color:#ffd43b;
+ transform:rotateX(180deg)}
+.coinres{font-size:21px;font-weight:800;min-height:26px}
+.coinres.show{animation:pop .45s ease-out}
+@keyframes pop{0%{transform:scale(.55);opacity:0}100%{transform:scale(1);opacity:1}}
 .map.myvote{outline:3px solid #8ce99a;outline-offset:-3px}
 .vbadge{position:absolute;top:6px;left:7px;font-size:12px;font-weight:700;
  padding:2px 7px;border-radius:5px;background:rgba(59,91,219,.92);text-shadow:none}
@@ -150,9 +157,13 @@ button:disabled{opacity:.5;cursor:default}
   <div id="hostBanner"></div>
   <div class="bar">
     <h2 id="title">CS2 Map Veto</h2>
-    <div id="me"></div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="me"></div>
+      <button id="muteBtn" class="small" onclick="toggleMute()">🔊</button>
+    </div>
   </div>
   <div class="status" id="conn">Connecting…</div>
+  <div class="status" id="counts"></div>
   <div class="turn" id="turn"></div>
   <div class="status" id="timer"></div>
   <div class="err" id="err"></div>
@@ -199,7 +210,7 @@ function newLobby(cfg){
     steps: buildMapSteps(cfg.maps.length, cfg.mode, first),
     step_index: 0, phase: "lobby", result: [],
     side_steps: [], side_index: 0, log: [],
-    present: {A:false, B:false}, votes: {}, deadline: null,
+    present: {A:0, B:0}, votes: {}, deadline: null,
     vote_seconds: Math.min(180, Math.max(5, cfg.vote_seconds || 30))
   };
 }
@@ -274,7 +285,7 @@ function voteContext(L){
 function stateFor(L){
   return {
     mode:L.mode, phase:L.phase, first:L.first, side_pick:L.side_pick,
-    team_names:L.team_names, present:L.present || {A:false,B:false},
+    team_names:L.team_names, present:L.present || {A:0,B:0},
     maps:L.maps.map(m => ({name:m.name, display:disp(m.name), status:m.status})),
     current: currentAction(L),
     result: L.result.map(r => ({name:r.name, display:disp(r.name),
@@ -289,6 +300,39 @@ function stateFor(L){
 // ====================================================================
 const qs = new URLSearchParams(location.search);
 const slug = () => Math.random().toString(36).slice(2,8);
+
+// ---- generated sound effects (Web Audio, no files) ----
+let AC = null, MUTED = false;
+function audio(){
+  if(!AC){ try{ AC = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){} }
+  if(AC && AC.state === "suspended") AC.resume();
+  return AC;
+}
+function tone(freq, dur, type, gain, when){
+  const ac = audio(); if(!ac || MUTED) return;
+  const t0 = ac.currentTime + (when || 0);
+  const osc = ac.createOscillator(), g = ac.createGain();
+  osc.type = type || "sine"; osc.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain || 0.2, t0 + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g).connect(ac.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.03);
+}
+const sfxTick   = last => tone(last ? 1040 : 620, 0.09, "square", 0.16);
+const sfxBan    = () => { tone(300,0.13,"sawtooth",0.22); tone(150,0.26,"sawtooth",0.2,0.06); };
+const sfxPick   = () => { tone(540,0.11,"triangle",0.22); tone(760,0.16,"triangle",0.2,0.07); };
+const sfxReveal = () => { tone(660,0.18,"triangle",0.22); tone(990,0.26,"triangle",0.2,0.12); };
+const sfxCoin   = () => { for(let i=0;i<7;i++) tone(820 + Math.random()*640, 0.07, "sine", 0.07, i*0.07); };
+const sfxDone   = () => [523,659,784,1047].forEach((f,i)=> tone(f,0.32,"triangle",0.24,i*0.13));
+// unlock the audio context on the first user interaction (browser autoplay rules)
+window.addEventListener("pointerdown", () => audio(), {once:true});
+function toggleMute(){
+  MUTED = !MUTED;
+  const b = document.getElementById("muteBtn");
+  if(b) b.textContent = MUTED ? "🔇" : "🔊";
+  if(!MUTED) audio();
+}
 
 // ----- HOST role: build create UI -----
 function initCreate(){
@@ -305,12 +349,11 @@ function initCreate(){
 let HOST = null; // {lobby, conns:[{conn,team}], role, tokens, you}
 
 function updatePresence(){
-  const p = {A:false, B:false};
-  if(HOST.role === "A") p.A = true;
-  if(HOST.role === "B") p.B = true;
-  for(const e of HOST.conns){ if(e.team === "A") p.A = true;
-    if(e.team === "B") p.B = true; }
-  HOST.lobby.present = p;
+  const p = {A:0, B:0};
+  if(HOST.role === "A") p.A++;
+  if(HOST.role === "B") p.B++;
+  for(const e of HOST.conns){ if(e.team === "A") p.A++; else if(e.team === "B") p.B++; }
+  HOST.lobby.present = p;   // counts of connected players per team
 }
 
 function startVeto(){
@@ -593,6 +636,26 @@ function renderState(S){
   if(S.phase === "lobby"){ res.innerHTML = renderRoster(S); }
   else { res.innerHTML = (S.phase === "side" ? sidePanel(S) : "") + resultHtml(S); }
   renderLog(S);
+
+  // always-visible connected counts
+  const cp = S.present || {A:0,B:0};
+  document.getElementById("counts").textContent =
+    `👥 ${tn.A}: ${cp.A} · ${tn.B}: ${cp.B}  ·  total ${cp.A + cp.B} connected`;
+
+  playSounds(S);
+  PREV = S;
+}
+
+let PREV = null;
+function playSounds(S){
+  if(!PREV) return;                       // skip on first render (e.g. late joiner)
+  if(S.log.length > PREV.log.length){
+    for(const e of S.log.slice(PREV.log.length)){
+      if(e.action === "ban") sfxBan();
+      else sfxPick();                     // pick or side
+    }
+  }
+  if(PREV.phase !== "done" && S.phase === "done") sfxDone();
 }
 
 function sidePanel(S){
@@ -611,13 +674,12 @@ function sidePanel(S){
 }
 
 function renderRoster(S){
-  const p = S.present || {A:false,B:false}, tn = S.team_names;
-  let h = `<div class="roster">
-    <div class="pcard ${p.A?'on':''}">${tn.A}: ${p.A?'✅ connected':'⏳ waiting'}</div>
-    <div class="pcard ${p.B?'on':''}">${tn.B}: ${p.B?'✅ connected':'⏳ waiting'}</div>
-   </div>`;
+  const p = S.present || {A:0,B:0}, tn = S.team_names;
+  const line = (t,n) => `<div class="pcard ${n>0?'on':''}">${t}: `+
+    `${n>0 ? `✅ ${n} connected` : '⏳ waiting'}</div>`;
+  let h = `<div class="roster">${line(tn.A,p.A)}${line(tn.B,p.B)}</div>`;
   if(HOST){
-    const ready = p.A && p.B;
+    const ready = p.A>0 && p.B>0;
     h += `<button onclick="startVeto()" ${ready?'':'disabled'}>`+
          `${ready?'Start veto':'Waiting for both teams…'}</button>`;
   } else {
@@ -630,16 +692,21 @@ let coinAnimating = false;
 function showCoin(first, tn){
   if(coinAnimating) return;
   coinAnimating = true;
+  sfxCoin();
   document.getElementById("coinArea").innerHTML =
-    `<div class="coinwrap"><div class="coin" id="coin">
+    `<div class="coinwrap"><div class="cointoss"><div class="coin" id="coin">
        <div class="face front">${tn.A}</div>
-       <div class="face back">${tn.B}</div></div>
+       <div class="face back">${tn.B}</div></div></div>
      <div class="coinres" id="coinres">&nbsp;</div></div>`;
   const coin = document.getElementById("coin");
-  const target = 360*5 + (first === "A" ? 0 : 180);
-  requestAnimationFrame(() => { coin.style.transform = `rotateY(${target}deg)`; });
-  setTimeout(() => { const r = document.getElementById("coinres");
-    if(r) r.textContent = `🪙 ${tn[first]} bans first!`; }, 2700);
+  // rotateX so the landed face ends upright; +180 lands on the back (Team B)
+  const target = 360 * 5 + (first === "A" ? 0 : 180);
+  requestAnimationFrame(() => { coin.style.transform = `rotateX(${target}deg)`; });
+  setTimeout(() => {
+    const r = document.getElementById("coinres");
+    if(r){ r.textContent = `🪙 ${tn[first]} bans first!`; r.classList.add("show"); }
+    sfxReveal();
+  }, 2650);
 }
 const dispOf = (S,n) => { const m = S.maps.find(x=>x.name===n); return m?m.display:n; };
 
@@ -661,14 +728,19 @@ function renderLog(S){
   }).join("<br>");
 }
 
-// per-second countdown ticker for the vote timer
+// per-second countdown ticker for the vote timer (with tick beeps on the last 5s)
+let lastTick = null;
 setInterval(() => {
   const el = document.getElementById("timer");
   if(!el) return;
   if(VOTE_DEADLINE){
     const s = Math.max(0, Math.ceil((VOTE_DEADLINE - Date.now()) / 1000));
     el.textContent = "⏱ " + s + "s to vote";
-  } else { el.textContent = ""; }
+    if(s !== lastTick){
+      if(s <= 5 && s >= 1) sfxTick(s === 1);
+      lastTick = s;
+    }
+  } else { el.textContent = ""; lastTick = null; }
 }, 250);
 
 // ====================================================================

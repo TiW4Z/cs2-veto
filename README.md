@@ -12,7 +12,10 @@ browsers talk directly to each other over WebRTC.
 - **Team voting:** on a team's turn, every connected player votes for the map
   (live tally shown). A **30-second timer** runs; when it expires the leading
   map locks (ties broken randomly). A solo/1v1 team locks instantly.
-- A **coin-flip animation** reveals who bans first when the host starts the veto.
+- A 3-D **coin-flip animation** reveals who bans first when the host starts the veto.
+- **Sound effects** (generated in-browser, no files): coin toss, last-5-seconds
+  countdown ticks, ban/pick, and a final fanfare. A 🔊/🔇 mute toggle is in the header.
+- **Live connected-player counts** per team (and total) are always shown.
 - Optional **side (CT/T) pick** after maps are locked (also a team vote).
 
 ## How it connects (and why there's no server)
