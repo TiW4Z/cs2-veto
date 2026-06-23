@@ -45,15 +45,21 @@ button.small{padding:4px 10px;font-size:12px;background:#2c313c}
  padding:10px 14px;margin:14px 0;font-size:17px}
 .maps{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
  gap:10px;margin-top:8px}
-.map{background:#1f232b;border:1px solid #2c313c;border-radius:10px;
- padding:18px 12px;text-align:center;font-size:16px;position:relative}
-.map.available.mine{cursor:pointer;border-color:#3b5bdb}
-.map.available.mine:hover{background:#26304a}
-.map.banned{opacity:.35;text-decoration:line-through}
-.map.picked_A{border-color:#8ce99a;background:#1c2a20}
-.map.picked_B{border-color:#ffd43b;background:#2a261c}
-.map.decider{border-color:#9fb4ff;background:#1e2440}
-.tag{position:absolute;top:6px;right:8px;font-size:11px;opacity:.8}
+.map{position:relative;border:2px solid #2c313c;border-radius:10px;height:98px;
+ overflow:hidden;background:#1f232b center/cover no-repeat;
+ display:flex;align-items:flex-end}
+.map .name{width:100%;padding:6px 9px;font-size:15px;font-weight:600;
+ text-align:left;text-shadow:0 1px 4px #000;
+ background:linear-gradient(transparent,rgba(0,0,0,.85))}
+.map.available.mine{cursor:pointer}
+.map.available.mine:hover{outline:3px solid #3b5bdb;outline-offset:-3px}
+.map.banned{filter:grayscale(1) brightness(.4)}
+.map.banned .name{text-decoration:line-through}
+.map.picked_A{border-color:#8ce99a}
+.map.picked_B{border-color:#ffd43b}
+.map.decider{border-color:#9fb4ff;box-shadow:0 0 0 2px #9fb4ff inset}
+.tag{position:absolute;top:6px;right:7px;font-size:11px;font-weight:600;
+ padding:2px 7px;border-radius:5px;background:rgba(0,0,0,.7);text-shadow:none}
 .side button{margin:6px 4px 0 0}
 .result{background:#1f232b;border:1px solid #2c313c;border-radius:10px;
  padding:14px;margin-top:18px}
@@ -408,7 +414,9 @@ function renderState(S){
       : m.status === "decider" ? "decider" : "";
     const el = document.createElement("div");
     el.className = `map ${m.status} ${clickable?"mine":""}`;
-    el.innerHTML = `${m.display}<span class="tag">${tag}</span>`;
+    el.style.backgroundImage = `url("maps/${m.name}.png")`;
+    el.innerHTML = (tag ? `<span class="tag">${tag}</span>` : "") +
+      `<span class="name">${m.display}</span>`;
     if(clickable) el.onclick = () => sendAction({type:"pick", map:m.name});
     md.appendChild(el);
   }
