@@ -117,17 +117,9 @@ button:disabled{opacity:.5;cursor:default}
   <p class="status">Peer-to-peer, no server. Create a lobby, send one link per
    team, and veto together in real time.</p>
 
-  <div class="row">
-    <div><h2>Format</h2>
-      <label><input type="radio" name="mode" value="bo1" checked> Best of 1 (Premier style — alternating bans)</label>
-      <label><input type="radio" name="mode" value="bo3"> Best of 3 (ban, ban, pick, pick, ban…)</label>
-    </div>
-    <div><h2>Who bans first</h2>
-      <label><input type="radio" name="first" value="random" checked> Random</label>
-      <label><input type="radio" name="first" value="A"> Team A</label>
-      <label><input type="radio" name="first" value="B"> Team B</label>
-    </div>
-  </div>
+  <h2>Format</h2>
+  <label><input type="radio" name="mode" value="bo1" checked> Best of 1 (Premier style — alternating bans)</label>
+  <label><input type="radio" name="mode" value="bo3"> Best of 3 (ban, ban, pick, pick, ban…)</label>
 
   <h2>Team names</h2>
   <div class="row">
@@ -137,7 +129,6 @@ button:disabled{opacity:.5;cursor:default}
 
   <h2>Your role</h2>
   <label><input type="radio" name="role" value="A" checked> I'm captain of Team A (you veto for A; send Team B their link)</label>
-  <label><input type="radio" name="role" value="B"> I'm captain of Team B</label>
   <label><input type="radio" name="role" value="spec"> I'm just organizing (send a link to both teams)</label>
 
   <h2>Map pool</h2>
@@ -426,7 +417,7 @@ function lockVote(){
 function startHost(){
   document.getElementById("createErr").textContent = "";
   const mode = document.querySelector('input[name=mode]:checked').value;
-  const first = document.querySelector('input[name=first]:checked').value;
+  const first = "random";   // first ban is always decided by the coin toss
   const role = document.querySelector('input[name=role]:checked').value;
   const side_pick = document.getElementById("sidePick").checked;
   const maps = [...document.querySelectorAll('#mapsPick input:checked')].map(c=>c.value);

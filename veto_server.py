@@ -3,7 +3,8 @@ CS2 Map Veto — lobby server
 ===========================
 
 One person (the host) opens the server, picks the map pool / format (BO1 or
-BO3) / which team acts first, and creates a lobby. The server hands back ONE
+BO3), and creates a lobby; a coin toss decides which team bans first. The
+server hands back ONE
 invite link per team (plus a spectator link). Each captain opens their link in
 a browser and the two teams veto in real time, CS2-Premier style, with an
 optional side (CT/T) pick once maps are locked.
@@ -352,17 +353,9 @@ button{background:#3b5bdb;color:#fff;border:0;border-radius:8px;padding:10px 16p
 .err{color:#ff8787}
 </style></head><body>
 <h1>CS2 Map Veto — create a lobby</h1>
-<div class="row">
- <div><h2>Format</h2>
-  <label><input type="radio" name="mode" value="bo1" checked> Best of 1 (Premier style — alternating bans)</label>
-  <label><input type="radio" name="mode" value="bo3"> Best of 3 (ban, ban, pick, pick, ban…)</label>
- </div>
- <div><h2>Who bans first</h2>
-  <label><input type="radio" name="first" value="random" checked> Random</label>
-  <label><input type="radio" name="first" value="A"> Team A</label>
-  <label><input type="radio" name="first" value="B"> Team B</label>
- </div>
-</div>
+<h2>Format</h2>
+<label><input type="radio" name="mode" value="bo1" checked> Best of 1 (Premier style — alternating bans)</label>
+<label><input type="radio" name="mode" value="bo3"> Best of 3 (ban, ban, pick, pick, ban…)</label>
 <h2>Team names</h2>
 <div class="row">
  <input type="text" id="nameA" placeholder="Team A">
@@ -390,7 +383,7 @@ function link(label, path){
 document.getElementById('create').onclick = async () => {
   document.getElementById('err').textContent='';
   const mode = document.querySelector('input[name=mode]:checked').value;
-  const first = document.querySelector('input[name=first]:checked').value;
+  const first = "random";   // first ban is always decided by the coin toss
   const maps = [...document.querySelectorAll('#maps input:checked')].map(c=>c.value);
   const body = {mode, first, maps,
     names:{A:nameA.value, B:nameB.value}, side_pick:true};

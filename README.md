@@ -47,10 +47,9 @@ run or pay for.
 ## Using it
 
 1. Open the page and click **Create lobby**. Choose:
-   - **Format** (BO1 / BO3) and **who bans first** (random / Team A / Team B),
+   - **Format** (BO1 / BO3) — the coin flip always decides who bans first,
    - **Team names**,
-   - **Your role** — captain of Team A, captain of Team B, or just organizing
-     (spectator),
+   - **Your role** — captain of Team A, or just organizing (spectator),
    - the **map pool**, whether to add a **side pick**, and the **vote timer**.
 2. You get **both invite links**: send your own team's link to your teammates
    ("Send to your teammates"), and the other link to the opposing team. Everyone
