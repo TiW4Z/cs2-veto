@@ -79,28 +79,71 @@ button:disabled{opacity:.5;cursor:default}
 .pcard{background:#1f232b;border:1px solid #2c313c;border-radius:8px;
  padding:8px 12px;font-size:14px}
 .pcard.on{border-color:#8ce99a}
-.coinwrap{display:flex;flex-direction:column;align-items:center;gap:16px;
- padding:24px 0;perspective:1100px}
-.coin{width:150px;height:150px;position:relative;transform-style:preserve-3d}
-.coin.spinA{animation:flipA 2.6s cubic-bezier(.25,.6,.3,1) forwards}
-.coin.spinB{animation:flipB 2.6s cubic-bezier(.25,.6,.3,1) forwards}
-@keyframes flipA{0%{transform:translateY(10px) rotateX(0)}
- 45%{transform:translateY(-95px) rotateX(900deg)}
+.coinwrap{display:flex;flex-direction:column;align-items:center;gap:20px;
+ padding:34px 0 26px;perspective:1300px}
+.coinstage{position:relative;width:190px;height:200px;display:flex;
+ align-items:center;justify-content:center}
+/* pulsing halo behind the coin */
+.coinstage::before{content:"";position:absolute;width:230px;height:230px;
+ border-radius:50%;z-index:0;opacity:0;
+ background:radial-gradient(circle,rgba(140,233,154,.30),transparent 62%);
+ animation:halo 2.9s ease-in-out forwards}
+.coinstage.haloB::before{background:radial-gradient(circle,rgba(255,212,59,.30),transparent 62%)}
+@keyframes halo{0%{opacity:0;transform:scale(.6)}55%{opacity:.5}
+ 100%{opacity:1;transform:scale(1.08)}}
+/* ground shadow that breathes with the toss */
+.coinshadow{position:absolute;bottom:6px;left:50%;width:140px;height:24px;
+ transform:translateX(-50%);border-radius:50%;z-index:0;filter:blur(3px);
+ background:radial-gradient(ellipse at center,rgba(0,0,0,.6),transparent 70%);
+ animation:tossShadow 2.9s cubic-bezier(.2,.7,.25,1) forwards}
+@keyframes tossShadow{0%{transform:translateX(-50%) scale(1);opacity:.6}
+ 50%{transform:translateX(-50%) scale(.4);opacity:.22}
+ 86%{transform:translateX(-50%) scale(1.06);opacity:.62}
+ 100%{transform:translateX(-50%) scale(1);opacity:.6}}
+.coin{width:160px;height:160px;position:relative;transform-style:preserve-3d;z-index:1}
+.coin.spinA{animation:flipA 2.9s cubic-bezier(.2,.66,.25,1) forwards}
+.coin.spinB{animation:flipB 2.9s cubic-bezier(.2,.66,.25,1) forwards}
+/* high toss, many spins, a little settle bounce on landing */
+@keyframes flipA{
+ 0%{transform:translateY(22px) rotateX(0) scale(.96)}
+ 12%{transform:translateY(-150px) rotateX(560deg) scale(1.06)}
+ 50%{transform:translateY(-184px) rotateX(1240deg) scale(1.05)}
+ 84%{transform:translateY(8px) rotateX(1800deg) scale(1)}
+ 92%{transform:translateY(-16px) rotateX(1800deg)}
  100%{transform:translateY(0) rotateX(1800deg)}}
-@keyframes flipB{0%{transform:translateY(10px) rotateX(0)}
- 45%{transform:translateY(-95px) rotateX(990deg)}
+@keyframes flipB{
+ 0%{transform:translateY(22px) rotateX(180deg) scale(.96)}
+ 12%{transform:translateY(-150px) rotateX(740deg) scale(1.06)}
+ 50%{transform:translateY(-184px) rotateX(1420deg) scale(1.05)}
+ 84%{transform:translateY(8px) rotateX(1980deg) scale(1)}
+ 92%{transform:translateY(-16px) rotateX(1980deg)}
  100%{transform:translateY(0) rotateX(1980deg)}}
 .coin .face{position:absolute;inset:0;border-radius:50%;display:flex;
- align-items:center;justify-content:center;text-align:center;padding:8px;
- font-size:19px;font-weight:800;backface-visibility:hidden;
- border:6px solid rgba(255,255,255,.16);
- box-shadow:0 12px 34px rgba(0,0,0,.6), inset 0 0 22px rgba(0,0,0,.4)}
-.coin .front{background:radial-gradient(circle at 36% 30%,#2f5d3b,#13231a);color:#8ce99a}
-.coin .back{background:radial-gradient(circle at 36% 30%,#5c4b1f,#231c0f);color:#ffd43b;
- transform:rotateX(180deg)}
-.coinres{font-size:21px;font-weight:800;min-height:26px}
-.coinres.show{animation:pop .45s ease-out}
-@keyframes pop{0%{transform:scale(.55);opacity:0}100%{transform:scale(1);opacity:1}}
+ align-items:center;justify-content:center;text-align:center;padding:10px;
+ font-size:20px;font-weight:800;letter-spacing:.3px;overflow:hidden;
+ backface-visibility:hidden;text-shadow:0 1px 3px rgba(0,0,0,.65);
+ box-shadow:0 16px 42px rgba(0,0,0,.6), inset 0 0 0 5px rgba(255,255,255,.05),
+   inset 0 0 30px rgba(0,0,0,.5)}
+/* reeded (ridged) metallic rim */
+.coin .face::before{content:"";position:absolute;inset:0;border-radius:50%;
+ background:repeating-conic-gradient(rgba(255,255,255,.28) 0 3deg,
+   rgba(0,0,0,.32) 3deg 6deg);
+ -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 11px),#000 calc(100% - 10px));
+ mask:radial-gradient(farthest-side,transparent calc(100% - 11px),#000 calc(100% - 10px));
+ opacity:.55;pointer-events:none}
+/* sweeping highlight */
+.coin .face::after{content:"";position:absolute;top:-40%;width:46%;height:200%;
+ background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);
+ transform:rotate(18deg);animation:shine 2.9s ease-in-out infinite;pointer-events:none}
+@keyframes shine{0%{left:-50%}55%{left:130%}100%{left:130%}}
+.coin .front{color:#eaffef;background:
+ radial-gradient(circle at 34% 28%,#6cf09a,#2f7d4e 38%,#114026 72%,#0a2417)}
+.coin .back{color:#fff7df;transform:rotateX(180deg);background:
+ radial-gradient(circle at 34% 28%,#ffe08a,#d4a437 38%,#7a5a16 72%,#3a2a09)}
+.coinres{font-size:23px;font-weight:800;min-height:28px}
+.coinres.show{animation:pop .55s cubic-bezier(.2,1.35,.4,1)}
+@keyframes pop{0%{transform:scale(.4);opacity:0;filter:blur(4px)}
+ 60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1;filter:blur(0)}}
 .map.myvote{outline:3px solid #8ce99a;outline-offset:-3px}
 .vbadge{position:absolute;top:6px;left:7px;font-size:12px;font-weight:700;
  padding:2px 7px;border-radius:5px;background:rgba(59,91,219,.92);text-shadow:none}
@@ -693,15 +736,20 @@ function showCoin(first, tn){
   sfxCoin();
   // .spinA / .spinB keyframes spin the coin and land it upright on the winner
   document.getElementById("coinArea").innerHTML =
-    `<div class="coinwrap"><div class="coin spin${first}" id="coin">
-       <div class="face front">${tn.A}</div>
-       <div class="face back">${tn.B}</div></div>
-     <div class="coinres" id="coinres">&nbsp;</div></div>`;
+    `<div class="coinwrap">
+       <div class="coinstage${first==='B'?' haloB':''}">
+         <div class="coinshadow"></div>
+         <div class="coin spin${first}" id="coin">
+           <div class="face front">${tn.A}</div>
+           <div class="face back">${tn.B}</div>
+         </div>
+       </div>
+       <div class="coinres" id="coinres">&nbsp;</div></div>`;
   setTimeout(() => {
     const r = document.getElementById("coinres");
     if(r){ r.textContent = `🪙 ${tn[first]} bans first!`; r.classList.add("show"); }
     sfxReveal();
-  }, 2650);
+  }, 2900);
 }
 const dispOf = (S,n) => { const m = S.maps.find(x=>x.name===n); return m?m.display:n; };
 
